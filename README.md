@@ -1,16 +1,20 @@
-# pix_glance
+## Project
 
-A new Flutter project.
+***"PixGlance"*** an image viewing Application that can view various types of images.
 
-## Getting Started
+The list of images formats you can view - 
 
-This project is a starting point for a Flutter application.
+- `svg`
+- `png`
+- `jpg`
+- `jpeg`
+- `gif`
+- `webp`
+- `tiff`
+- `tif`
+- `bmp`
+- `heic`
+- `heiv`
+- `ico`
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+I'll try to add to add more in the near future.
