@@ -1,3 +1,6 @@
 ## Project
 
-Mobile version for "Pix Glance" application written in flutter
+_Mobile version_ for ***"Pix Glance"*** application written in Flutter
+
+
+
