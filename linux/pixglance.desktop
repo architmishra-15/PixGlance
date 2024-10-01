@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=PixGlance
+Comment=Image viewer and editor
+Exec=/usr/bin/pixglance
+Icon=pixglance
+Terminal=false
+Type=Application
+Categories=Graphics;

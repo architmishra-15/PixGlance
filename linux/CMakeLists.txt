@@ -4,10 +4,10 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "pix_glance")
+set(BINARY_NAME "PixGlance")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.pix_glance")
+set(APPLICATION_ID "com.example.pixglance")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -113,6 +113,17 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
+
+# Install the icon
+install(FILES ${CMAKE_SOURCE_DIR}/flutter/assets/icon/your-icon.png
+        DESTINATION /usr/share/icons/hicolor/256x256/apps
+        RENAME pixglance.png)
+
+# Install the .desktop file
+install(FILES ${CMAKE_SOURCE_DIR}/linux/pixglance.desktop
+        DESTINATION /usr/share/applications)
+
+install(TARGETS ${BINARY_NAME} DESTINATION /usr/bin)
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
