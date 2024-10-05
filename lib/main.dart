@@ -1,18 +1,35 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'package:photo_view/photo_view.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image/image.dart' as img;
-import 'package:image_cropper/image_cropper.dart';
+import 'dart:math';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
+import 'package:animated_toggle_switch/animated_toggle_switch.dart';
 
 void main() {
   runApp(const MaterialApp(home: MyApp()));
 }
+
+final List<String> supportedImageExtensions = [
+  'jpg',
+  'jpeg',
+  'png',
+  'tif',
+  'tiff',
+  'gif',
+  'bmp',
+  'heic',
+  'heif',
+  'webp',
+  'svg',
+  'ico'
+];
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -21,7 +38,7 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
+class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   ThemeMode _themeMode = ThemeMode.system;
   String? selectedFilePath;
   bool isFullScreen = false;
@@ -29,52 +46,152 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
       displayedImage; // Stores the current image with correct orientation
   int rotationAngle = 0; // Initial rotation angle in degrees
   bool isSvg = false;
-  bool hideBarsOnZoom = false; // Track hiding bars during zoom
   double opacityLevel = 1.0; // Controls AppBar and BottomAppBar visibility
-  bool inCropMode = false; // Track whether user is in crop mode
   late TransformationController controller;
-  TapDownDetails? tapDownDetails;
   late AnimationController animationController;
   Animation<Matrix4>? animation;
-  File? _imageFile;  // The current image file
   Uint8List? imageBytes; // The current image bytes
+  TapDownDetails? tapDownDetails;
+  int currentIndex = 0;
+  late List<FileSystemEntity> _imageFiles = [];
+  final Map<String, img.Image> _imageCache = {};
+  bool isCachingEnabled = false;
+  List<String> _cachedImages = [];
+  bool isImageOpened = false; // To track if an image is opened
 
   @override
   void initState() {
     super.initState();
-    requestStoragePermission();
+    requestStoragePermission(context);
     _loadThemePreference();
+    _loadCachePreference();
     controller = TransformationController();
     animationController = AnimationController(
       vsync: this,
-    duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 300),
     )..addListener(() {
-      controller.value = animation!.value;
-    });
+        controller.value = animation!.value;
+      });
   }
 
   @override
   void dispose() {
     controller.dispose();
     animationController.dispose();
-
     super.dispose();
+  }
+
+  // Function to open the image file
+  void _openImageFile(String filePath) {
+    print("Opening image from: $filePath");
+    // Here you can call your selectImage method or directly handle the image
+    selectImage(filePath); // Assuming selectImage opens the image
+  }
+
+  // Load cache preference
+  Future<void> _loadCachePreference() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isCachingEnabled = prefs.getBool('isCachingEnabled') ?? false;
+      _cachedImages = prefs.getStringList('cachedImages') ?? [];
+    });
+  }
+
+  // Save cache preference
+  Future<void> _saveCachePreference(bool enabled) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.setBool('isCachingEnabled', enabled);
+  }
+
+  // Cache image function
+  Future<void> _cacheImage(String filePath) async {
+    if (isCachingEnabled) {
+      if (_cachedImages.contains(filePath)) return; // Already cached
+
+      setState(() {
+        _cachedImages.add(filePath);
+        if (_cachedImages.length > 15) {
+          _cachedImages.removeAt(0); // Maintain last 15 images
+        }
+      });
+
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      prefs.setStringList('cachedImages', _cachedImages);
+    }
+  }
+
+  Future<void> _openFeedback() async {
+    final url = Uri.parse("https://pixglance.github.io/pixglance/");
+
+    if (!await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.inAppWebView);
+    } else {
+      showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text("Error Opening!!"),
+              content: const Text("Feedback form cannot be opened!\n\nPlease contact the creator of the app"),
+              backgroundColor: Theme.of(context)
+                  .dialogBackgroundColor, // Match theme background
+            );
+          });
+    }
+  }
+
+  img.Image? _decodeImage(String filePath) {
+    final bytes = File(filePath)
+        .readAsBytesSync(); // Sync since it's in a separate isolate
+    final img.Image? image = img.decodeImage(Uint8List.fromList(bytes));
+    if (image != null) {
+      final img.Image fixedImage = img.bakeOrientation(image);
+      return fixedImage;
+    }
+    return null;
+  }
+
+  img.Image resizeImage(img.Image image, double maxWidth, double maxHeight) {
+    int width = image.width;
+    int height = image.height;
+
+    if (width > maxWidth || height > maxHeight) {
+      final scale = min(maxWidth / width, maxHeight / height);
+      width = (width * scale).toInt();
+      height = (height * scale).toInt();
+    }
+
+    return img.copyResize(image, width: width, height: height);
   }
 
   Future<void> _loadThemePreference() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? theme = prefs.getString('theme');
+
     setState(() {
-      _themeMode = theme == 'dark' ? ThemeMode.dark : ThemeMode.light;
+      if (theme == 'dark') {
+        _themeMode = ThemeMode.dark;
+      } else if (theme == 'light') {
+        _themeMode = ThemeMode.light;
+      } else {
+        _themeMode = ThemeMode
+            .system; // Default to system theme if no preference is found
+      }
     });
   }
 
   Future<void> _saveThemePreference(ThemeMode mode) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('theme', mode == ThemeMode.dark ? 'dark' : 'light');
+    await prefs.setString(
+      'theme',
+      mode == ThemeMode.dark
+          ? 'dark'
+          : mode == ThemeMode.light
+              ? 'light'
+              : 'system', // Save system theme as 'system'
+    );
   }
 
-  Future<void> requestStoragePermission() async {
+  Future<void> requestStoragePermission(BuildContext context) async {
     var status = await Permission.storage.status;
     if (!status.isGranted) {
       PermissionStatus result = await Permission.storage.request();
@@ -97,24 +214,56 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
     }
   }
 
+  void loadImagesFromDirectory(String filePath) {
+    // Get the directory where the image is located
+    Directory imageDir = File(filePath).parent;
+
+    // List all image files in the directory
+    List<FileSystemEntity> files = imageDir.listSync().where((file) {
+      // Check for common image extensions including SVGs
+      return supportedImageExtensions
+          .contains(file.path.split('.').last.toLowerCase());
+    }).toList();
+
+    // Update image paths list
+    setState(() {
+      _imageFiles = files;
+      currentIndex = _imageFiles.indexOf(filePath as FileSystemEntity);
+    });
+  }
+
+  void showNextImage() {
+    if (currentIndex < _imageFiles.length - 1) {
+      setState(() {
+        currentIndex++; // Move to next image
+        selectedFilePath = _imageFiles[currentIndex].path;
+      });
+    } else {
+      const AlertDialog(
+        content: Text("No more image!"),
+      );
+    }
+  }
+
+  void showPreviousImage() {
+    if (currentIndex > 0) {
+      setState(() {
+        currentIndex--; // Move to previous image
+        selectedFilePath = _imageFiles[currentIndex].path;
+      });
+    } else {
+      const AlertDialog(
+        content: Text("No previous image"),
+      );
+    }
+  }
+
   void toggleFullScreen() {
     setState(() {
       isFullScreen = !isFullScreen;
       opacityLevel = isFullScreen ? 0.0 : 1.0;
     });
   }
-
-  // Future<img.Image?> fixImageOrientation(String filePath) async {
-  //   final bytes = await File(filePath).readAsBytes();
-  //   final img.Image? image = img.decodeImage(Uint8List.fromList(bytes));
-  //
-  //   if (image != null) {
-  //     // Correct the orientation using EXIF data
-  //     final img.Image fixedImage = img.bakeOrientation(image);
-  //     return fixedImage;
-  //   }
-  //   return null;
-  // }
 
   // Function to rotate the image by 90 degrees
   void rotateImage() {
@@ -123,246 +272,208 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
     });
   }
 
-  // Function to view SVG files using flutter_svg
-  // Function to open and fix orientation of raster images
-  // Image selection logic
   Future<img.Image?> openImage(String filePath) async {
-    final bytes = await File(filePath).readAsBytes();
-    final img.Image? image = img.decodeImage(Uint8List.fromList(bytes));
-
-    if (image != null) {
-      final img.Image fixedImage = img.bakeOrientation(image);
-      return fixedImage;
+    if (_imageCache.containsKey(filePath)) {
+      return _imageCache[filePath];
     }
+    final img.Image? image = await compute(_decodeImage, filePath);
+    if (image != null) {
+      final img.Image resizedImage = resizeImage(
+          image,
+          MediaQuery.of(context).size.width,
+          MediaQuery.of(context).size.height);
+      _imageCache[filePath] = resizedImage;
+      return resizedImage;
+    }
+    setState(() {
+      selectedFilePath = filePath;
+      isImageOpened = true; // Set to true when an image is opened
+    });
     return null;
   }
 
-  Future<void> selectImage() async {
+  void closeImage() {
+    setState(() {
+      selectedFilePath = null;
+      isImageOpened = false; // Set to false when no image is opened
+    });
+  }
+
+  Future<void> selectImage([String? filePath]) async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-      );
+      if (filePath == null) {
+        final result = await FilePicker.platform.pickFiles(
+          allowedExtensions: [
+            'jpg',
+            'jpeg',
+            'png',
+            'tif',
+            'tiff',
+            'gif',
+            'bmp',
+            'heic',
+            'heif',
+            'webp',
+            'svg',
+            'ico'
+          ],
+          type: FileType.custom,
+          allowMultiple: false,
+        );
 
-      if (result != null) {
-        String filePath = result.files.single.path!;
-        String extension = filePath.split('.').last.toLowerCase();
-
-        if (extension == 'svg') {
-          setState(() {
-            selectedFilePath = filePath;
-            isSvg = true;
-          });
+        if (result != null) {
+          filePath = result.files.single.path!;
         } else {
-          img.Image? fixedImage = await openImage(filePath);
-          setState(() {
-            selectedFilePath = filePath;
-            displayedImage = fixedImage;
-            isSvg = false;
-          });
+          return; // No file selected
         }
       }
+
+      String extension = filePath.split('.').last.toLowerCase();
+      setState(() {
+        selectedFilePath = filePath;
+        _imageFiles.clear(); // Clear previous images
+        // loadImagesFromDirectory(filePath);
+      });
+
+      if (extension == 'svg') {
+        setState(() {
+          isSvg = true;
+          selectedFilePath = filePath;
+        });
+      } else {
+        img.Image? fixedImage = await openImage(filePath);
+        setState(() {
+          displayedImage = fixedImage;
+          isSvg = false;
+          selectedFilePath = filePath;
+        });
+      }
+      Navigator.pop(context);
+      loadImagesFromDirectory(filePath);
     } catch (e) {
-      print('Error selecting image: $e');
+      const Text("Image could not be loaded");
     }
   }
 
   // Widget to display an image (SVG or Raster)
   Widget viewImage() {
-    return InteractiveViewer(
-        panEnabled: false,
-        scaleEnabled: false,
-        minScale: 1.0,
-        maxScale: 4.0, // Set maximum zoom scale
-        child: Image.file(
-          File(selectedFilePath!), // Make sure you pass the correct file here
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return const Text("Error loading image");
-          },
+    return GestureDetector(
+        onDoubleTap: onDoubleTap, // Attach double-tap handler
+        child: InteractiveViewer(
+          boundaryMargin: const EdgeInsets.all(0),
+          transformationController: controller,
+          panEnabled: true, // Enable panning
+          scaleEnabled: true,
+          // boundaryMargin: EdgeInsets.zero, // Remove boundaries
+          minScale: 1.0,
+          maxScale: 50.0, // Set maximum zoom scale
+          child: SizedBox(
+            width: MediaQuery.of(context).size.width,
+            height: MediaQuery.of(context).size.height,
+            child: selectedFilePath!.endsWith('.svg')
+                ? SvgPicture.file(File(selectedFilePath!))
+                : Image.file(
+                    File(selectedFilePath!),
+                    fit: BoxFit.scaleDown,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Text("Error loading image");
+                    },
+                  ),
+          ),
         ));
   }
 
-  // custom AppBar
-  // AppBar for normal view
-  PreferredSizeWidget buildAppBar() {
-    if (inCropMode) {
-      return buildCropAppBar();
-    }
+  void onDoubleTap() {
+    double currentScale = controller.value.getMaxScaleOnAxis();
 
-    return AppBar(
-      backgroundColor: Colors.black.withOpacity(0.5),
-      title: const Text("Pix Glance"),
-      leading: Builder(
-        builder: (context) {
-          return IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () {
-              Scaffold.of(context).openDrawer();
-            },
-          );
-        },
-      ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.crop),
-          onPressed: () {
-            setState(() {
-              inCropMode = true;
-            });
+    if (currentScale > 1.0) {
+      controller.value = Matrix4.identity();
+    } else {
+      final position = tapDownDetails!.localPosition;
+      const double scale = 3;
+      final x = -position.dx * (scale - 1);
+      final y = -position.dy * (scale - 1);
+      final zoomed = Matrix4.identity()
+        ..translate(x, y)
+        ..scale(scale);
+
+      final end = controller.value.isIdentity() ? zoomed : Matrix4.identity();
+
+      animation = Matrix4Tween(
+        begin: controller.value,
+        end: end,
+      ).animate(CurveTween(curve: Curves.easeOut).animate(animationController));
+      animationController.forward(from: 0);
+    }
+  }
+
+  PreferredSizeWidget buildAppBar() {
+      return AppBar(
+        backgroundColor: Colors.black.withOpacity(0.5),
+        title: const Text("Pix Glance"),
+        leading: Builder(
+          builder: (context) {
+            return IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () {
+                Scaffold.of(context).openDrawer();
+              },
+            );
           },
         ),
-      ],
-    );
-  }
-
-  // Function to crop the image
-  void cropImage() async {
-    if (_imageFile != null) {
-      CroppedFile? croppedFile = await ImageCropper().cropImage(
-        sourcePath: _imageFile!.path,
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Crop Image',
-            toolbarColor: Colors.deepOrange,
-            toolbarWidgetColor: Colors.white,
-            initAspectRatio: CropAspectRatioPreset.original,
-            lockAspectRatio: false,
-        aspectRatioPresets: [
-          CropAspectRatioPreset.square,
-          CropAspectRatioPreset.ratio3x2,
-          CropAspectRatioPreset.original,
-          CropAspectRatioPreset.ratio4x3,
-          CropAspectRatioPreset.ratio16x9,
-        ],
-          )
-    ],
       );
-
-      if (croppedFile != null) {
-        setState(() {
-          _imageFile = File(croppedFile.path);
-          inCropMode = false;  // Exit crop mode after cropping
-        });
-      }
-    }
-  }
-
-  // Function to save the current image
-  Future<void> saveImage() async {
-    if (_imageFile != null) {
-      // Logic to overwrite the current file
-      final newPath = _imageFile!.path;
-      // You can add logic here to write the image bytes to the file
-      // Currently, it overwrites the image
-      print("Image saved at: $newPath");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Image saved successfully!')),
-      );
-    }
-  }
-
-  // Function to save the image as a copy
-  Future<void> saveImageAsCopy() async {
-    if (_imageFile != null) {
-      final directory = await getApplicationDocumentsDirectory();
-      final newPath = '${directory.path}/copy_${DateTime.now().millisecondsSinceEpoch}.png';
-      File newImage = await _imageFile!.copy(newPath);
-      print("Image saved as a copy at: ${newImage.path}");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Image saved as a copy!')),
-      );
-    }
-  }
-
-  // AppBar for crop mode
-  PreferredSizeWidget buildCropAppBar() {
-    return AppBar(
-      backgroundColor: Colors.black.withOpacity(0.5),
-      title: const Text("Crop Image"),
-      leading: IconButton(
-        icon: const Icon(Icons.cancel),
-        onPressed: () {
-          setState(() {
-            inCropMode = false;
-          });
-        },
-      ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.save),
-          onPressed: saveImage,
-        ),
-        IconButton(
-          icon: const Icon(Icons.save_alt),
-          onPressed: saveImageAsCopy,
-        ),
-      ],
-    );
   }
 
   // Normal Bottom AppBar with image editing options
   Widget buildBottomBar() {
-    if (inCropMode) {
-      return buildCropBottomBar();
+    double backOpacity;
+    Color widColor;
+
+    if (_themeMode == ThemeMode.dark) {
+       backOpacity = 0.5;
+    } else {
+      backOpacity = 0.8;
+    }
+
+    if (backOpacity == 0.5) {
+      widColor = Colors.white;
+    } else{
+      widColor = Colors.white70;
     }
 
     return BottomAppBar(
-      color: Colors.black.withOpacity(0.5),
-      child: SizedBox(
-        height: 50,
+      color: Colors.black.withOpacity(backOpacity),
+      height: 65,
+        elevation: 0,
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             IconButton(
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.rotate_left),
+              color: widColor,
               onPressed: rotateImage,
             ),
             IconButton(
+              color: widColor,
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.info),
               onPressed: showImageInfo,
             ),
             IconButton(
+              color: widColor,
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.edit),
               onPressed: renameImage,
             ),
             IconButton(
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.delete),
               onPressed: deleteImage,
+                color: widColor,
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // Crop Bottom AppBar with crop and rotate options
-  Widget buildCropBottomBar() {
-    return BottomAppBar(
-      color: Colors.black.withOpacity(0.5),
-      child: SizedBox(
-        height: 50,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.crop),
-              onPressed: cropImage,
-            ),
-            IconButton(
-              icon: const Icon(Icons.rotate_left),
-              onPressed: () {
-                // Rotate left during crop mode
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.rotate_right),
-              onPressed: () {
-                // Rotate right during crop mode
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -370,7 +481,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
     if (await Permission.storage.isGranted) {
       selectImage();
     } else {
-      await requestStoragePermission();
+      await requestStoragePermission(context);
     }
   }
 
@@ -380,40 +491,38 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Select Theme'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('System'),
-                onTap: () {
-                  setState(() {
-                    _themeMode = ThemeMode.system;
-                  });
-                  _saveThemePreference(_themeMode);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Dark'),
-                onTap: () {
-                  setState(() {
-                    _themeMode = ThemeMode.dark;
-                  });
-                  _saveThemePreference(_themeMode);
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: const Text('Light'),
-                onTap: () {
-                  setState(() {
-                    _themeMode = ThemeMode.light;
-                  });
-                  _saveThemePreference(_themeMode);
-                  Navigator.pop(context);
-                },
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                ListTile(
+                  title: const Text('Light Theme'),
+                  onTap: () {
+                    setState(() {
+                      _themeMode = ThemeMode.light;
+                    });
+                    Navigator.of(context).pop();
+                  },
+                ),
+                ListTile(
+                  title: const Text('Dark Theme'),
+                  onTap: () {
+                    setState(() {
+                      _themeMode = ThemeMode.dark;
+                    });
+                    Navigator.of(context).pop();
+                  },
+                ),
+                ListTile(
+                  title: const Text('System Default'),
+                  onTap: () {
+                    setState(() {
+                      _themeMode = ThemeMode.system;
+                    });
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -430,23 +539,63 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
           content: const Text('Are you sure you want to delete this image?'),
           actions: [
             TextButton(
-              onPressed: () {
-                File(selectedFilePath!).deleteSync();
-                setState(() {
-                  selectedFilePath = null;
-                });
-                Navigator.of(context).pop();
-              },
-              child: const Text('Delete'),
-            ),
-            TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (_imageFiles.isNotEmpty) {
+                  File currentImageFile = _imageFiles[currentIndex] as File;
+
+                  if (currentImageFile.existsSync()) {
+                    currentImageFile.deleteSync();
+
+                    setState(() {
+                      _imageFiles.removeAt(currentIndex); // Remove from list
+
+                      // Handle cases where no images remain
+                      if (_imageFiles.isEmpty) {
+                        selectedFilePath = null;
+                      } else {
+                        // Move to the next image, or adjust for boundaries
+                        if (currentIndex >= _imageFiles.length) {
+                          currentIndex = _imageFiles.length - 1;
+                        }
+                        selectedFilePath = _imageFiles[currentIndex].path;
+                      }
+                    });
+                  }
+                }
+
+                Navigator.of(context).pop(); // Close dialog
+              },
+              child: const Text('Delete'),
             ),
           ],
         );
       },
     );
+  }
+
+  // Show image info logic
+  void showImageInfo() {
+    if (selectedFilePath != null) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Image Information'),
+            content: Text('File Path: $selectedFilePath'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   // Rename image logic
@@ -457,10 +606,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
         context: context,
         builder: (BuildContext context) {
           return AlertDialog(
-            title: const Text('Rename Image'),
+            title: const Text('Rename'),
             content: TextField(
               controller: controller,
-              decoration: const InputDecoration(hintText: "Enter new name"),
+              decoration: const InputDecoration(hintText: "New Name"),
             ),
             actions: [
               TextButton(
@@ -477,36 +626,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
                   Navigator.of(context).pop();
                 },
               ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
-  // Info logic
-  void showImageInfo() {
-    if (selectedFilePath != null) {
-      final file = File(selectedFilePath!);
-      final fileSize = file.lengthSync();
-      final lastModified = file.lastModifiedSync();
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('Image Info'),
-            content: Text(
-              'File: $selectedFilePath\n'
-              '\nSize: ${fileSize / 1024} KB\n'
-              '\nLast Modified: $lastModified',
-            ),
-            actions: [
               TextButton(
-                child: const Text('OK'),
+                child: const Text("Cancel"),
                 onPressed: () {
                   Navigator.of(context).pop();
                 },
-              ),
+              )
             ],
           );
         },
@@ -517,93 +642,186 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin{
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
-          brightness:
-              _themeMode == ThemeMode.dark ? Brightness.dark : Brightness.light,
-        ),
-      ),
       themeMode: _themeMode,
+      darkTheme: ThemeData.dark(),
+      theme: ThemeData.light(),
       home: Scaffold(
-        appBar: isFullScreen
-            ? null
-            : buildAppBar(), // No need for AnimatedOpacity here,
-        drawer: isFullScreen
-            ? null
-            : Drawer(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    const DrawerHeader(
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                      ),
-                      child: Text('Choose your action'),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.photo),
-                      title: const Text('Select Image'),
-                      onTap: () {
-                        selectImage();
-                      },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.brightness_4),
-                      title: const Text('Select Theme'),
-                      onTap: () {
-                        selectTheme(context);
-                      },
-                    ),
-                  ],
+        drawer: Drawer(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              const DrawerHeader(
+                decoration: BoxDecoration(color: Colors.blue),
+                child: Text(
+                  'Menu',
+                  style: TextStyle(color: Colors.white, fontSize: 24),
                 ),
               ),
-        body: GestureDetector(
-          onDoubleTapDown: (details) => tapDownDetails = details,
-          onTap: toggleFullScreen,
-          onDoubleTap: () {
+              ListTile(
+                leading: const Icon(Icons.image),
+                title: const Text('Open Image'),
+                onTap: selectImage,
+              ),
+              ListTile(
+                leading: const Icon(Icons.palette),
+                title: const Text('Select Theme'),
+                onTap: () {
+                  selectTheme(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cached),
+                title: const Text('Enable Caching'),
+                trailing: CacheToggleSwitch(
+                  // Use your custom caching widget here
+                  isCachingEnabled: isCachingEnabled,
+                  onToggle: (value) async {
+                    setState(() {
+                      isCachingEnabled = value;
+                    });
 
-            final position = tapDownDetails!.localPosition;
-            const double scale = 3;
-            final x = -position.dx * (scale-1);
-            final y = -position.dy * (scale-1);
-            final zoomed = Matrix4.identity()
-              ..translate(x, y)
-              ..scale(scale);
-
-            final end = controller.value.isIdentity() ? zoomed : Matrix4.identity();
-
-            animation = Matrix4Tween(
-              begin: controller.value,
-              end: end,
-            ).animate(CurveTween(curve: Curves.easeOut).animate(animationController)
-            );
-            animationController.forward(from:0);
-          },
-          child: Center(
-            child: selectedFilePath != null
-                ? viewImage()
-                : const Text("No image selected"),
+                    await _saveCachePreference(isCachingEnabled);
+                    if (isCachingEnabled) {
+                      _cachedImages;
+                    } else {
+                      // Handle disabling caching if necessary
+                    }
+                  },
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.feedback_outlined),
+                title: const Text("Feedback"),
+                onTap: () async {
+                  try {
+                    await _openFeedback();
+                  } catch (error) {
+                    if (kDebugMode) {
+                      print("Cannot open");
+                    }
+                  }
+                },
+              )
+            ],
           ),
         ),
-        bottomNavigationBar: isFullScreen
-            ? null
-            : AnimatedOpacity(
-                opacity: opacityLevel,
-                duration: const Duration(
-                    milliseconds: 50), // Reduced duration for smooth effect
-                child: buildBottomBar(),
+        body: Stack(
+          children: [
+            Center(
+              child: selectedFilePath != null
+                  ? GestureDetector(
+                      onDoubleTapDown: (details) => tapDownDetails = details,
+                      onHorizontalDragUpdate: (details) {
+                        // Update the current index based on the swipe direction
+                        if (details.delta.dx > 5) {
+                          // Swipe Right
+
+                          if (kDebugMode) {
+                            print("previous img");
+                          }
+                          showPreviousImage();
+                          if (kDebugMode) {
+                            print(_imageFiles);
+                          }
+                          if (kDebugMode) {
+                            print(selectedFilePath);
+                          }
+
+                          if (currentIndex > 0) {
+                            selectedFilePath = _imageFiles[currentIndex].path;
+                          }
+                        } else if (details.delta.dx < -5) {
+                          // Swipe Left
+                          if (kDebugMode) {
+                            print("Next image");
+                          }
+                          showNextImage();
+                          if (kDebugMode) {
+                            print(_imageFiles);
+                          }
+                          if (kDebugMode) {
+                            print(selectedFilePath);
+                          }
+
+                          if (currentIndex < _imageFiles.length - 1) {
+                            if (kDebugMode) {
+                              print("Swipe left");
+                            }
+                            setState(() {
+                              currentIndex++;
+                              selectedFilePath = _imageFiles[currentIndex].path;
+                            });
+                          }
+                        }
+                      },
+                      onTap: toggleFullScreen,
+                      child: RotatedBox(
+                        quarterTurns: rotationAngle ~/ 90,
+                        child: isSvg
+                            ? SvgPicture.file(File(selectedFilePath!))
+                            : viewImage(), // Dynamically show the correct widget
+                      ),
+                    )
+                  : const Text('No image selected'),
+            ),
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: opacityLevel,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  buildAppBar(), // Conditionally show app bar
+                  isImageOpened ? Container() : buildBottomBar(), // Conditionally show bottom bar
+                ],
               ),
-        floatingActionButton: isFullScreen
-            ? null
-            : FloatingActionButton(
-                onPressed: selectImage,
-                child: const Icon(Icons.add_circle_sharp),
-              ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+            ),
+            Positioned(
+              bottom: 90,
+              right: 25.0,
+              child: Opacity(
+                  opacity: opacityLevel,
+                  child: FloatingActionButton(
+                    onPressed: selectImage,
+                    backgroundColor: Colors.purple,
+                    tooltip: "Open Image",
+                    child: const Icon(Icons.add),
+                  )),
+            )
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class CacheToggleSwitch extends StatelessWidget {
+  final bool isCachingEnabled;
+  final ValueChanged<bool> onToggle;
+
+  const CacheToggleSwitch(
+      {required this.isCachingEnabled, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedToggleSwitch<bool>.dual(
+      current: isCachingEnabled,
+      first: false,
+      second: true,
+      onChanged: onToggle,
+      styleBuilder: (value) => ToggleStyle(
+        borderRadius: BorderRadius.circular(99),
+        indicatorColor: value
+            ? Colors.green
+            : Colors.red, // Set the indicator color based on the state
+      ),
+      indicatorSize:
+          const Size(42.0, 35.0), // Size of the indicator //make this 25, 25
+      iconBuilder: (value) => value
+          ? const Icon(Icons.check, color: Colors.white) // Icon for 'on'
+          : const Icon(Icons.close, color: Colors.white), // Icon for 'off'
+
+      height: 40, //make this 30
+      fittingMode: FittingMode.preventHorizontalOverlapping,
     );
   }
 }

@@ -1,0 +1,29 @@
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh; /* Center content vertically */
+    margin: 0;
+    background-color: #000; /* Optional: Background color */
+  }
+  
+  .gradient-text {
+    font-size: 70px; /* Text size */
+    font-weight: bold; /* Text weight */
+    background: linear-gradient(60deg, #ff2600, #ee0979, #ffd000); /* Gradient colors */
+    background-size: 300%; /* Make the gradient larger for the animation */
+    -webkit-background-clip: text; /* Clip background to text */
+    -webkit-text-fill-color: transparent; /* Make text color transparent */
+    animation: gradient-animation 7s alternate-reverse infinite; /* Animation */
+  }
+  
+  /* Keyframes for animation */
+  @keyframes gradient-animation {
+    0% {
+      background-position: 0% 50%; /* Start position */
+    }
+    100% {
+      background-position: 100% 50%; /* End position */
+    }
+  }
+  

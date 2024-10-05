@@ -1,6 +1,6 @@
 {
-    "name": "pix_glance_android",
-    "short_name": "pix_glance_android",
+    "name": "pix_glance",
+    "short_name": "pix_glance",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
