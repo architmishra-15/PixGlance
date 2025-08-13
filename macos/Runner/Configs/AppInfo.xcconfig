@@ -8,7 +8,7 @@
 PRODUCT_NAME = pix_glance
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.pixGlance
+PRODUCT_BUNDLE_IDENTIFIER = com.archit.svgApp
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2024 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2025 com.archit. All rights reserved.

@@ -1,5 +1,5 @@
 name: pix_glance
-description: "A new Flutter project."
+description: "Viewing SVG images in Andriod"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,10 +16,10 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 2.0.0+1
 
 environment:
-  sdk: ^3.5.3
+  sdk: ^3.8.1
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -30,20 +30,22 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
-  file_picker: ^8.1.2
-  shared_preferences: ^2.3.2
-  flutter_svg: ^2.0.10+1
-  animated_toggle_switch: ^0.8.3
-  image: ^4.2.0
-  path: ^1.9.0
-  permission_handler: ^11.3.1
-  url_launcher: ^6.3.0
-
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  flutter_svg: ^2.0.9
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.1
+  file_picker: ^10.2.4
+  permission_handler: ^11.3.0
+  device_info_plus: ^11.5.0
+  cached_network_image: ^3.3.0
+  photo_view: ^0.14.0
+  mime: ^1.0.4
+  sqflite: ^2.3.0
+  url_launcher: ^6.2.1
+
 
 dev_dependencies:
   flutter_test:
@@ -54,7 +56,7 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^4.0.0
+  flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
